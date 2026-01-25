@@ -1,0 +1,295 @@
+"""
+Focused exploration based on all findings so far.
+Best matches found:
+- 10 chars with step3 pos23=176
+- 7 chars with random walk modifications
+"""
+import hashlib
+import ecdsa
+import base58
+import random
+
+RECT_DATA = [
+    (6264, 3780, 2484), (3540, 2156, 1384), (5040, 3968, 1072), (2684, 1428, 1256),
+    (3180, 1950, 1230), (3818, 2860, 958), (1152, 420, 732), (3015, 1755, 1260),
+    (506, 72, 434), (480, 180, 300), (1504, 1170, 334), (3900, 2950, 950),
+    (2132, 1950, 182), (850, 552, 298), (4293, 2457, 1836), (4214, 3096, 1118),
+    (5913, 4425, 1488), (3358, 2420, 938), (1395, 609, 786), (2520, 1938, 582),
+    (798, 330, 468), (1056, 240, 816), (2640, 1240, 1400), (3895, 2125, 1770),
+    (4400, 3010, 1390), (2726, 1540, 1186), (5856, 4028, 1828), (2268, 1040, 1228),
+    (3053, 1769, 1284), (4420, 2640, 1780), (3234, 1566, 1668), (5170, 3478, 1692),
+    (704, 96, 608), (2107, 1521, 586), (3328, 2520, 808), (1568, 902, 666),
+    (4453, 3213, 1240), (3550, 2332, 1218), (1472, 560, 912), (1139, 300, 839),
+    (690, 30, 660), (1419, 961, 458), (3472, 2352, 1120), (2898, 1764, 1134),
+    (672, 224, 448), (1173, 123, 1050), (2184, 1404, 780), (1581, 527, 1054),
+    (7476, 6006, 1470), (2793, 1961, 832), (3484, 2530, 954), (5280, 4042, 1238),
+    (126, 8, 118), (120, 32, 88), (3705, 2303, 1402), (5200, 3332, 1868),
+    (5829, 4187, 1642), (2537, 2255, 282), (1632, 720, 912), (3894, 2296, 1598),
+    (4130, 3762, 368), (2288, 768, 1520), (1380, 380, 1000), (1856, 1200, 656),
+]
+
+TARGET = "1cryptoGeCRiTzVgxBQcKFFjSVydN1GW7"
+
+shell = [r[2] for r in RECT_DATA]
+
+def privkey_to_address(privkey_bytes, compressed=True):
+    try:
+        sk = ecdsa.SigningKey.from_string(privkey_bytes, curve=ecdsa.SECP256k1)
+        vk = sk.get_verifying_key()
+        if compressed:
+            if vk.pubkey.point.y() % 2 == 0:
+                pubkey = b'\x02' + vk.to_string()[:32]
+            else:
+                pubkey = b'\x03' + vk.to_string()[:32]
+        else:
+            pubkey = b'\x04' + vk.to_string()
+        sha256_hash = hashlib.sha256(pubkey).digest()
+        ripemd160 = hashlib.new('ripemd160')
+        ripemd160.update(sha256_hash)
+        pubkey_hash = ripemd160.digest()
+        versioned = b'\x00' + pubkey_hash
+        checksum = hashlib.sha256(hashlib.sha256(versioned).digest()).digest()[:4]
+        return base58.b58encode(versioned + checksum).decode()
+    except:
+        return None
+
+def check_key(byte_list, desc=""):
+    if len(byte_list) != 32:
+        return False
+    if not all(0 <= b <= 255 for b in byte_list):
+        return False
+    privkey_bytes = bytes(byte_list)
+    for compressed in [True, False]:
+        addr = privkey_to_address(privkey_bytes, compressed)
+        if addr == TARGET:
+            print(f"\n{'='*60}")
+            print(f"SOLVED! {desc}")
+            print(f"Key: {privkey_bytes.hex()}")
+            print(f"Compressed: {compressed}")
+            print(f"{'='*60}")
+            with open("C:/Users/Public/SOLUTION.txt", "w") as f:
+                f.write(f"Solution: {desc}\n")
+                f.write(f"Key: {privkey_bytes.hex()}\n")
+            return True
+    return False
+
+def count_match(addr):
+    if not addr:
+        return 0
+    return sum(1 for a, b in zip(addr, TARGET) if a == b)
+
+print("="*70)
+print("FOCUSED SEARCH")
+print("="*70)
+
+# ============================================================================
+# 1. Step 3 base with pos23=176 - explore 2-byte mods
+# ============================================================================
+print("\n[1] Step 3 + pos23=176 + 2-byte mods...")
+
+indices = [(57 + i * 3) % 64 for i in range(32)]
+base_key = [shell[idx] // 7 % 256 for idx in indices]
+base_key[23] = 176
+
+best = 10
+for p1 in range(32):
+    if p1 == 23:
+        continue
+    for v1 in range(256):
+        key = base_key.copy()
+        key[p1] = v1
+
+        for comp in [True, False]:
+            addr = privkey_to_address(bytes(key), comp)
+            match = count_match(addr)
+            if match > best:
+                best = match
+                c = "C" if comp else "U"
+                print(f"  p{p1}={v1} [{c}]: {match} - {addr[:20]}...")
+
+            if check_key(key, f"step3_23_176_{p1}_{v1}"):
+                exit()
+
+    if p1 % 8 == 7:
+        print(f"  Completed position {p1}")
+
+print(f"Best with step3 base: {best}")
+
+# ============================================================================
+# 2. Try the standard pairs formula with FIX
+# ============================================================================
+print("\n[2] Standard pairs + FIX + mods...")
+
+shell_m = shell.copy()
+shell_m[39] *= 17
+
+base_key = [(shell_m[i*2] + shell_m[i*2+1]) // 7 % 256 for i in range(32)]
+print(f"Base: {bytes(base_key).hex()}")
+
+best = 0
+for p1 in range(32):
+    for v1 in range(256):
+        key = base_key.copy()
+        key[p1] = v1
+
+        for comp in [True, False]:
+            addr = privkey_to_address(bytes(key), comp)
+            match = count_match(addr)
+            if match > best:
+                best = match
+                c = "C" if comp else "U"
+                print(f"  p{p1}={v1} [{c}]: {match} - {addr[:20]}...")
+
+            if check_key(key, f"pairs_fix_{p1}_{v1}"):
+                exit()
+
+print(f"Best with pairs+FIX: {best}")
+
+# ============================================================================
+# 3. Hill climbing from best known candidates
+# ============================================================================
+print("\n[3] Hill climbing...")
+
+# Start with step3 + 23=176
+best_key = [shell[(57 + i * 3) % 64] // 7 % 256 for i in range(32)]
+best_key[23] = 176
+
+best_addr = privkey_to_address(bytes(best_key), True)
+best_match = count_match(best_addr)
+
+print(f"Starting match: {best_match}")
+
+improved = True
+iterations = 0
+while improved and iterations < 100:
+    improved = False
+    iterations += 1
+
+    for pos in range(32):
+        for val in range(256):
+            key = best_key.copy()
+            key[pos] = val
+
+            for comp in [True, False]:
+                addr = privkey_to_address(bytes(key), comp)
+                match = count_match(addr)
+
+                if match > best_match:
+                    best_match = match
+                    best_key = key.copy()
+                    improved = True
+                    c = "C" if comp else "U"
+                    print(f"  Improved to {match} [{c}]: {addr[:20]}...")
+
+                if check_key(key, f"hill_{iterations}_{pos}_{val}"):
+                    exit()
+
+print(f"Hill climbing final: {best_match}")
+
+# ============================================================================
+# 4. Multi-start local search
+# ============================================================================
+print("\n[4] Multi-start local search...")
+
+patterns = [
+    # (start, step, div, description)
+    (57, 3, 7, "step3"),
+    (57, 26, 7, "step26"),
+    (0, 2, 7, "step2"),
+    (39, 17, 7, "step17from39"),
+]
+
+best_global = 0
+for start, step, div, desc in patterns:
+    indices = [(start + i * step) % 64 for i in range(32)]
+    key_base = [shell[idx] // div % 256 for idx in indices]
+
+    # Random local search
+    random.seed(42)
+    best_local = count_match(privkey_to_address(bytes(key_base), True))
+
+    for trial in range(10000):
+        key = key_base.copy()
+        # Modify 1-3 positions
+        for _ in range(random.randint(1, 3)):
+            key[random.randint(0, 31)] = random.randint(0, 255)
+
+        for comp in [True, False]:
+            addr = privkey_to_address(bytes(key), comp)
+            match = count_match(addr)
+
+            if match > best_local:
+                best_local = match
+                c = "C" if comp else "U"
+                print(f"  {desc} trial {trial} [{c}]: {match} - {addr[:15]}...")
+
+            if match > best_global:
+                best_global = match
+
+            if check_key(key, f"{desc}_{trial}"):
+                exit()
+
+print(f"\nBest multi-start: {best_global}")
+
+# ============================================================================
+# 5. Genetic algorithm approach
+# ============================================================================
+print("\n[5] Genetic algorithm...")
+
+random.seed(123)
+
+def fitness(key):
+    addr = privkey_to_address(bytes(key), True)
+    return count_match(addr)
+
+# Initialize population from best patterns
+population = []
+for start in [0, 39, 53, 57]:
+    for step in [2, 3, 17, 26]:
+        for div in [7, 10]:
+            indices = [(start + i * step) % 64 for i in range(32)]
+            key = [shell[idx] // div % 256 for idx in indices]
+            population.append(key)
+
+# Add random keys
+for _ in range(50):
+    population.append([random.randint(0, 255) for _ in range(32)])
+
+best_fitness = 0
+for generation in range(500):
+    # Evaluate fitness
+    scored = [(fitness(k), k) for k in population]
+    scored.sort(reverse=True)
+
+    if scored[0][0] > best_fitness:
+        best_fitness = scored[0][0]
+        print(f"  Gen {generation}: best fitness {best_fitness}")
+        if check_key(scored[0][1], f"genetic_{generation}"):
+            exit()
+
+    # Select top 20
+    survivors = [k for _, k in scored[:20]]
+
+    # Create new population
+    population = survivors.copy()
+
+    # Crossover
+    for _ in range(30):
+        p1 = random.choice(survivors)
+        p2 = random.choice(survivors)
+        point = random.randint(1, 31)
+        child = p1[:point] + p2[point:]
+        population.append(child)
+
+    # Mutation
+    for _ in range(50):
+        parent = random.choice(survivors).copy()
+        for _ in range(random.randint(1, 3)):
+            parent[random.randint(0, 31)] = random.randint(0, 255)
+        population.append(parent)
+
+print(f"\nGenetic best: {best_fitness}")
+
+print("\n" + "="*70)
+print("Focused search complete")
+print("="*70)
